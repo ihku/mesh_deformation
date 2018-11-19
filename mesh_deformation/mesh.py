@@ -1,25 +1,33 @@
 #!/usr/bin/env python3
 
+from collections import defaultdict
 import numpy as np
 
+
 class Mesh:
-    def __init__(self, vertices, polygons):
-        '''
-        `vertices` : ndarray of float32, list of points
-        `polygons` : ndarray of int, list of polygons,
+    def __init__(self, vertices: np.ndarray, polygons: np.ndarray):
+        """
+        `vertices` : numpy.ndarray of float32, list of points
+        `polygons` : numpy.ndarray of int, list of polygons,
                     where each polygon is a list with three vertex indices
-        '''
+        """
         
         self._vertices = vertices
         self._polygons = polygons
-    
-    def get_vertex(self, i):
+
+    def get_vertices(self) -> np.ndarray:
+        return self._vertices
+
+    def get_polygons(self) -> np.ndarray:
+        return self._polygons
+
+    def get_vertex(self, i: int) -> np.ndarray:
         return self._vertices[i]
     
-    def get_num_vertices(self):
+    def get_num_vertices(self) -> int:
         return len(self._vertices)
-    
-    def get_edges(self):
+
+    def get_edges(self) -> dict:
         edges = dict()
         for i, tr in enumerate(self._polygons):
             edges[(tr[0], tr[1])] = i
@@ -30,12 +38,20 @@ class Mesh:
             edges[(tr[2], tr[1])] = i
         return edges
 
+
+def edges_to_adjacency_list(edges) -> dict:
+    adj_list = defaultdict(list)
+    for u, v in edges:
+        adj_list[u].append(v)
+    return adj_list
+
+
 def read_obj(path):
-    '''
+    """
     implements a simplified Wavefront .obj parser
     reads obj at `path`
     returns Mesh
-    '''
+    """
     
     vertices = []
     faces = []
