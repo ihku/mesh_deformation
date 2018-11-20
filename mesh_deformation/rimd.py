@@ -1,11 +1,31 @@
 #!/usr/bin/env python3
 
+from collections import defaultdict
+
 import tqdm
 import numpy as np
 import scipy.sparse
 import scipy.linalg
 
 from .mesh import Mesh, edges_to_adjacency_list
+
+
+def cosv(a, b):
+    return np.sum(a * b) / ((a ** 2).sum() * (b ** 2).sum()) ** 0.5
+
+
+def _compute_coefs(mesh: Mesh) -> dict:
+    vertices = mesh.get_vertices()
+    res = defaultdict(lambda: 0)
+    for poly in mesh.get_polygons():
+        for i in range(3):
+            u, v, w = poly[i], poly[i - 2], poly[i - 1]
+            p1, p2, p3 = vertices[u], vertices[v], vertices[w]
+            c = cosv(p2 - p3, p1 - p3)
+            t = c / (1 - c ** 2) ** 0.5
+            res[(u, v)] += t
+            res[(v, u)] += t
+    return res
 
 
 def meshes_to_rimds(meshes):
@@ -28,20 +48,20 @@ def meshes_to_rimds(meshes):
             yield v, adj
 
     edges = meshes[0].get_edges()
-    features = [[] for i in range(len(meshes))]
     decomps = dict()
+    cotans_dict = _compute_coefs(meshes[0])
     for u, vs in group_tuples(sorted(edges.keys())):
-        faces = np.array([edges[(u, v)] for v in vs])
         centers = np.array([mesh.get_vertex(u) for mesh in meshes])
         adj = np.array([[mesh.get_vertex(v) for v in vs]
                         for mesh in meshes])
+        cotans = np.array([cotans_dict[(u, v)] for v in vs], dtype=np.float32)
         # float32[n_meshes, n_adj, 3]
         diffs = centers[:, None, :] - adj
         diffs0 = diffs[0]
         # TODO: weights
         # linear regression formula
-        tmp = np.linalg.inv(np.einsum('mai,maj->mij', diffs, diffs))
-        coefs = np.einsum('mij,maj,ak->mik', tmp, diffs, diffs0)
+        tmp = np.linalg.inv(np.einsum('mai,maj->mij', diffs * cotans[:, None], diffs))  # ?
+        coefs = np.einsum('mij,maj,ak->mik', tmp, diffs * cotans[:, None], diffs0)
         decomp = [scipy.linalg.polar(coefs[i]) for i in range(coefs.shape[0])]
         assert u not in decomps
         decomps[u] = decomp
@@ -66,7 +86,7 @@ def meshes_to_rimds(meshes):
                                 logdr[1, 1], logdr[1, 2], logdr[2, 2]])
         features.append(feature)
 
-    return features
+    return np.array(features, dtype=np.float32)
 
 
 def rimds_to_meshes(rimd, mesh0: Mesh):
@@ -89,6 +109,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
     drs = np.array([[scipy.linalg.expm(matr33sym(rimd_[i, t * 6:(t + 1) * 6]))
                      for t in range(len(edges_k))]
                     for i in range(n_meshes)])
+    cotans_dict = _compute_coefs(mesh0)
 
     def optimize(ss, drs):
         # TODO: implement function
@@ -104,17 +125,19 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
         drs = drs_
 
         # second, perform Cholesky factorization of matrix A
-        # TODO: weights
         A = scipy.sparse.csc_matrix((3 * n_vertices, 3 * n_vertices), dtype=np.float32)
         adj_list = edges_to_adjacency_list(edges.keys())
         for v, v_edges in adj_list.items():
-            A[v * 3, v * 3] = len(v_edges)
-            A[v * 3 + 1, v * 3 + 1] = len(v_edges)
-            A[v * 3 + 2, v * 3 + 2] = len(v_edges)
+            s = 0
             for u in v_edges:
-                A[v * 3, u * 3] = -1
-                A[v * 3 + 1, u * 3 + 1] = -1
-                A[v * 3 + 2, u * 3 + 2] = -1
+                t = cotans_dict[(v, u)]
+                A[v * 3, u * 3] = -t
+                A[v * 3 + 1, u * 3 + 1] = -t
+                A[v * 3 + 2, u * 3 + 2] = -t
+                s += t
+            A[v * 3, v * 3] = s
+            A[v * 3 + 1, v * 3 + 1] = s
+            A[v * 3 + 2, v * 3 + 2] = s
 
         # TODO: explore time of numpy vs scipy implementations
         # TODO: what to do if A isn't positive definite
@@ -129,22 +152,25 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
             for u, u_edges in adj_list.items():
                 for v in u_edges:
                     b[u * 3:(u + 1) * 3] += (mat_[v * 3:(v + 1) * 3] / len(adj_list[v])
-                                             + mat_[u * 3:(u + 1) * 3] / len(adj_list[u])) @ (vert0[u] - vert0[v])
-            return b
+                                             + mat_[u * 3:(u + 1) * 3] / len(adj_list[u])) \
+                                            @ (vert0[u] - vert0[v]) * cotans_dict[(u, v)]
+            return b / 2
+
         b = update_b()
 
         # third, perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 50
+        N_ITERS = 100
         for i in range(N_ITERS):
             # global step
-            # FIXME: update b
             vertices[:] = scipy.linalg.cho_solve((L, False), b).reshape(-1, 3)
             # local step
+            # TODO: weights
             mat_ = np.zeros(shape=(n_vertices * 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
-                    mat_[u * 3:(u + 1) * 3] += np.outer(vert0[u] - vert0[v], vertices[u] - vertices[v])
+                    mat_[u * 3:(u + 1) * 3] += np.outer(vert0[u] - vert0[v], vertices[u] - vertices[v]) \
+                                               * cotans_dict[(u, v)]
             Q = np.zeros(shape=(n_vertices * 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
