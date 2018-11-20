@@ -91,8 +91,7 @@ def meshes_to_rimds(meshes):
         for i, j in sorted(edges.keys()):
             if i < j:  # need only unique edges
                 dr = rs[i].T @ rs[j]
-                print(dr)
-                assert np.allclose(dr, dr.T)
+                # assert np.allclose(dr, dr.T)
                 logdr, err = scipy.linalg.logm(dr, disp=False)
                 feature.extend([logdr[0, 0], logdr[0, 1], logdr[0, 2],
                                 logdr[1, 1], logdr[1, 2], logdr[2, 2]])
@@ -124,7 +123,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
     cotans_dict = _compute_coefs(mesh0)
 
     # perform Cholesky factorization of matrix A
-    A = scipy.sparse.csc_matrix((3 * n_vertices, 3 * n_vertices), dtype=np.float64)
+    A = scipy.sparse.lil_matrix((3 * n_vertices, 3 * n_vertices), dtype=np.float64)
     adj_list = edges_to_adjacency_list(edges.keys())
     for v, v_edges in adj_list.items():
         s = 0
@@ -176,8 +175,8 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
 
         # perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 100
-        for i in range(N_ITERS):
+        N_ITERS = 15
+        for i in tqdm.trange(N_ITERS):
             # global step
             vertices[1:] = scipy.linalg.cho_solve((L, False), b).reshape(-1, 3)
             # local step
@@ -205,3 +204,10 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
         return Mesh(vertices, mesh0.get_polygons().copy())
 
     return [optimize(ss[i], drs[i]) for i in range(n_meshes)]
+
+
+def write_rimd(path, rimd):
+    np.save(path, rimd)
+
+def read_rimd(path):
+    return np.load(path)

@@ -2,4 +2,4 @@
 
 import mesh_deformation
 
-mesh_deformation.test_rimd_meshes()
+mesh_deformation.run_all()
