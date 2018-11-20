@@ -6,6 +6,7 @@ import tqdm
 import numpy as np
 import scipy.sparse
 import scipy.linalg
+from sksparse.cholmod import cholesky
 
 from .mesh import Mesh, edges_to_adjacency_list
 from .utils import savetxt
@@ -142,8 +143,10 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
     A_left = A[3:, :3]
     b_sub = A_left @ vert0[0]
     A = A[3:, 3:]
-    L = scipy.linalg.cholesky(A.toarray())
-    print('determinant of A:', np.linalg.det(A[3:, 3:].toarray()))
+    print('cholesky started')
+    # L = scipy.linalg.cholesky(A.toarray())
+    A_factor = cholesky(A)
+    print('cholesky finished')
 
     def optimize(ss, drs):
         # first, initialize parameters
@@ -178,7 +181,8 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
         N_ITERS = 15
         for i in tqdm.trange(N_ITERS):
             # global step
-            vertices[1:] = scipy.linalg.cho_solve((L, False), b).reshape(-1, 3)
+            # vertices[1:] = scipy.linalg.cho_solve((L, False), b).reshape(-1, 3)
+            vertices[1:] = A_factor(b).reshape(-1, 3)
             # local step
             # TODO: weights
             mat_ = np.zeros(shape=(n_vertices * 3, 3))
