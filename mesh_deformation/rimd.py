@@ -69,7 +69,9 @@ def meshes_to_rimds(meshes):
     return features
 
 
-def rimd_to_meshes(rimd, mesh0: Mesh):
+def rimds_to_meshes(rimd, mesh0: Mesh):
+    rimd = np.asanyarray(rimd, np.float32)
+
     # float32[n_meshes, n_features]
     assert len(rimd.shape) == 2
 
@@ -85,7 +87,7 @@ def rimd_to_meshes(rimd, mesh0: Mesh):
     edges_k = list(sorted((u, v) for u, v in edges.keys() if u < v))
     rimd_ = rimd[:, n_vertices * 6:]
     drs = np.array([[scipy.linalg.expm(matr33sym(rimd_[i, t * 6:(t + 1) * 6]))
-                     for t in range(len(edges_k) // 2)]
+                     for t in range(len(edges_k))]
                     for i in range(n_meshes)])
 
     def optimize(ss, drs):
@@ -110,29 +112,34 @@ def rimd_to_meshes(rimd, mesh0: Mesh):
             A[v * 3 + 1, v * 3 + 1] = len(v_edges)
             A[v * 3 + 2, v * 3 + 2] = len(v_edges)
             for u in v_edges:
-                A[v * 3, u * 3] = len(v_edges)
-                A[v * 3 + 1, u * 3 + 1] = len(v_edges)
-                A[v * 3 + 2, u * 3 + 2] = len(v_edges)
+                A[v * 3, u * 3] = -1
+                A[v * 3 + 1, u * 3 + 1] = -1
+                A[v * 3 + 2, u * 3 + 2] = -1
 
         # TODO: explore time of numpy vs scipy implementations
+        # TODO: what to do if A isn't positive definite
         L = scipy.linalg.cholesky(A.toarray())
 
-        mat_ = np.zeros(shape=(n_vertices * 3, 3))
-        for u, u_edges in adj_list.items():
-            for v in u_edges:
-                mat_[u * 3:(u + 1) * 3] += rs[v] @ drs[(v, u)] @ ss[u]
-        b = np.zeros(shape=(n_vertices * 3,))
-        for u, u_edges in adj_list.items():
-            for v in u_edges:
-                b[u * 3:(u + 1) * 3] += (mat_[v * 3: (v + 1) * 3] / len(adj_list[v])
-                                         + mat_[u * 3: (u + 1) * 3] / len(adj_list[u])) @ (vert0[u] - vert0[v])
+        def update_b():
+            mat_ = np.zeros(shape=(n_vertices * 3, 3))
+            for u, u_edges in adj_list.items():
+                for v in u_edges:
+                    mat_[u * 3:(u + 1) * 3] += rs[v] @ drs[(v, u)] @ ss[u]
+            b = np.zeros(shape=(n_vertices * 3,))
+            for u, u_edges in adj_list.items():
+                for v in u_edges:
+                    b[u * 3:(u + 1) * 3] += (mat_[v * 3:(v + 1) * 3] / len(adj_list[v])
+                                             + mat_[u * 3:(u + 1) * 3] / len(adj_list[u])) @ (vert0[u] - vert0[v])
+            return b
+        b = update_b()
 
         # third, perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 10
+        N_ITERS = 50
         for i in range(N_ITERS):
             # global step
-            vertices[:] = scipy.linalg.cho_solve((L, False), b)
+            # FIXME: update b
+            vertices[:] = scipy.linalg.cho_solve((L, False), b).reshape(-1, 3)
             # local step
             mat_ = np.zeros(shape=(n_vertices * 3, 3))
             for u, u_edges in adj_list.items():
@@ -147,6 +154,7 @@ def rimd_to_meshes(rimd, mesh0: Mesh):
                 u, s, vh = np.linalg.svd(Q_i)
                 rs[i] = (u @ vh).T
                 # TODO: refactor arrays from (n * 3, 3) to (n, 3, 3)
+            b = update_b()
 
         return Mesh(vertices, mesh0.get_polygons().copy())
 

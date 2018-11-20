@@ -11,7 +11,7 @@ class Mesh:
         `polygons` : numpy.ndarray of int, list of polygons,
                     where each polygon is a list with three vertex indices
         """
-        
+
         self._vertices = vertices
         self._polygons = polygons
 
@@ -23,7 +23,7 @@ class Mesh:
 
     def get_vertex(self, i: int) -> np.ndarray:
         return self._vertices[i]
-    
+
     def get_num_vertices(self) -> int:
         return len(self._vertices)
 
@@ -52,7 +52,7 @@ def read_obj(path):
     reads obj at `path`
     returns Mesh
     """
-    
+
     vertices = []
     faces = []
     with open(path, 'r') as fin:
@@ -68,3 +68,11 @@ def read_obj(path):
     # TODO: some checks
     return Mesh(np.array(vertices, dtype=np.float32),
                 np.array(faces, dtype=np.int))
+
+
+def write_obj(path, mesh):
+    with open(path, 'w') as fout:
+        for vertice in mesh.get_vertices():
+            fout.write('v {} {} {}\n'.format(vertice[0], vertice[1], vertice[2]))
+        for triangle in mesh.get_polygons():
+            fout.write('f {} {} {}\n'.format(triangle[0] + 1, triangle[1] + 1, triangle[2] + 1))
