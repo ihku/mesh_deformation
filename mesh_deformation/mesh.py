@@ -52,7 +52,6 @@ def read_obj(path):
     reads obj at `path`
     returns Mesh
     """
-
     vertices = []
     faces = []
     with open(path, 'r') as fin:

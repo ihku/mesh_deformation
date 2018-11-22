@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from collections import defaultdict
+from collections import defaultdict, deque
 
 import tqdm
 import numpy as np
@@ -10,6 +10,7 @@ from sksparse.cholmod import cholesky
 
 from .mesh import Mesh, edges_to_adjacency_list
 from .utils import savetxt
+
 
 def cosv(a, b):
     return np.sum(a * b) / ((a ** 2).sum() * (b ** 2).sum()) ** 0.5
@@ -30,7 +31,7 @@ def _compute_coefs(mesh: Mesh) -> dict:
 
 
 def meshes_to_rimds(meshes):
-    # need to check if meshes are similar
+    # TODO: check if meshes are similar
 
     def group_tuples(seq):
         v = None
@@ -60,14 +61,12 @@ def meshes_to_rimds(meshes):
         diffs = centers[:, None, :] - adj
         diffs0 = diffs[0]
         # linear regression formula
-        # BUG: swap diffs and diffs0
         tmp = np.linalg.inv(np.einsum('ai,aj->ij', diffs0 * cotans[:, None], diffs0))
         coefs = np.einsum('ij,aj,mak->mik', tmp, diffs0 * cotans[:, None], diffs)
         decomp = [scipy.linalg.polar(coefs[i]) for i in range(coefs.shape[0])]
         assert u not in decomps
         decomps[u] = decomp
 
-    # TODO: understand why all rs are ids
     # TODO: more checks
     savetxt('rs1.txt', np.array([np.array(decomps[i])[:, 0] for i in range(meshes[0].get_num_vertices())])
             .transpose((1, 0, 2, 3)),
@@ -143,23 +142,35 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
     A_left = A[3:, :3]
     b_sub = A_left @ vert0[0]
     A = A[3:, 3:]
-    print('cholesky started')
-    # L = scipy.linalg.cholesky(A.toarray())
     A_factor = cholesky(A)
-    print('cholesky finished')
+
+    def do_bfs(mesh0, drs):
+        queue = deque()
+        queue.append(0)
+        rs = dict()
+        rs[0] = np.eye(3)
+        while len(queue) != 0:
+            u = queue.popleft()
+            for v in adj_list[u]:
+                if v not in rs:
+                    rs[v] = rs[u] @ drs[u, v]
+                    queue.append(v)
+        return np.array([rs[v] for v in range(n_vertices)])
 
     def optimize(ss, drs):
         # first, initialize parameters
         # float64[n_vertices, 3]
         vertices = np.empty_like(vert0)  # initialization isn't required since first step is a global step
         vertices[0] = vert0[0]
-        rs = np.array([np.eye(3) for i in range(n_vertices)])  # TODO: advanced initialization with BFS
 
         drs_ = dict()
         for i, (u, v) in enumerate(edges_k):
             drs_[u, v] = drs[i]
             drs_[v, u] = drs[i].T
         drs = drs_
+
+        # rs = np.array([np.eye(3) for i in range(n_vertices)])
+        rs = do_bfs(mesh0, drs)
 
         def update_b():
             mat_ = np.zeros(shape=(n_vertices * 3, 3))
@@ -178,17 +189,17 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
 
         # perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 15
+        N_ITERS = 10
         for i in tqdm.trange(N_ITERS):
             # global step
-            # vertices[1:] = scipy.linalg.cho_solve((L, False), b).reshape(-1, 3)
             vertices[1:] = A_factor(b).reshape(-1, 3)
             # local step
             # TODO: weights
             mat_ = np.zeros(shape=(n_vertices * 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
-                    mat_[u * 3:(u + 1) * 3] += np.outer(vert0[u] - vert0[v], vertices[u] - vertices[v]) * cotans_dict[u, v]
+                    mat_[u * 3:(u + 1) * 3] += np.outer(vert0[u] - vert0[v], vertices[u] - vertices[v]) \
+                                               * cotans_dict[u, v]
             Q = np.zeros(shape=(n_vertices * 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
@@ -212,6 +223,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
 
 def write_rimd(path, rimd):
     np.save(path, rimd)
+
 
 def read_rimd(path):
     return np.load(path)
