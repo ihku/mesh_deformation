@@ -143,6 +143,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
     b_sub = A_left @ vert0[0]
     A = A[3:, 3:]
     A_factor = cholesky(A)
+    print('logdet(A):', A_factor.logdet())
 
     def do_bfs(mesh0, drs):
         queue = deque()
@@ -173,40 +174,37 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
         rs = do_bfs(mesh0, drs)
 
         def update_b():
-            mat_ = np.zeros(shape=(n_vertices * 3, 3))
+            mat_ = np.zeros(shape=(n_vertices, 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
-                    mat_[u * 3:(u + 1) * 3] += rs[v] @ drs[v, u] @ ss[u]
-            b = np.zeros(shape=(n_vertices * 3,))
+                    mat_[u] += rs[v] @ drs[v, u] @ ss[u]
+            b = np.zeros(shape=(n_vertices, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
-                    b[u * 3:(u + 1) * 3] += (mat_[v * 3:(v + 1) * 3] / len(adj_list[v])
-                                             + mat_[u * 3:(u + 1) * 3] / len(adj_list[u])) \
+                    b[u] += (mat_[v] / len(adj_list[v]) + mat_[u] / len(adj_list[u])) \
                                             @ (vert0[u] - vert0[v]) * cotans_dict[u, v]
-            return b[3:] / 2 - b_sub
+            return b[1:].ravel() / 2 - b_sub
 
         b = update_b()
 
         # perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 10
+        N_ITERS = 1
         for i in tqdm.trange(N_ITERS):
             # global step
             vertices[1:] = A_factor(b).reshape(-1, 3)
             # local step
             # TODO: weights
-            mat_ = np.zeros(shape=(n_vertices * 3, 3))
+            mat_ = np.zeros(shape=(n_vertices, 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
-                    mat_[u * 3:(u + 1) * 3] += np.outer(vert0[u] - vert0[v], vertices[u] - vertices[v]) \
-                                               * cotans_dict[u, v]
-            Q = np.zeros(shape=(n_vertices * 3, 3))
+                    mat_[u] += np.outer(vert0[u] - vert0[v], vertices[u] - vertices[v]) * cotans_dict[u, v]
+            Q = np.zeros(shape=(n_vertices, 3, 3))
             for u, u_edges in adj_list.items():
                 for v in u_edges:
-                    Q[u * 3:(u + 1) * 3] += drs[u, v] @ ss[v] @ mat_[v * 3:(v + 1) * 3] / len(adj_list[v])
+                    Q[u] += drs[u, v] @ ss[v] @ mat_[v] / len(adj_list[v])
             for i in range(n_vertices):
-                Q_i = Q[i * 3:(i + 1) * 3]
-                u, s, vh = np.linalg.svd(Q_i)
+                u, s, vh = np.linalg.svd(Q[i])
                 rs[i] = (u @ vh).T
                 if np.linalg.det(rs[i]) < 0:
                     rs[i] = -rs[i]
