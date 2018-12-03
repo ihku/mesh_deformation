@@ -5,10 +5,12 @@ import numpy as np
 
 
 class Mesh:
+    __slots__ = '_vertices', '_polygons'
+
     def __init__(self, vertices: np.ndarray, polygons: np.ndarray):
         """
-        `vertices` : numpy.ndarray of float32, list of points
-        `polygons` : numpy.ndarray of int, list of polygons,
+        :param vertices: numpy.ndarray of float32, list of points
+        :param polygons: numpy.ndarray of int, list of polygons,
                     where each polygon is a list with three vertex indices
         """
 
@@ -48,9 +50,10 @@ def edges_to_adjacency_list(edges) -> dict:
 
 def read_obj(path):
     """
-    implements a simplified Wavefront .obj parser
-    reads obj at `path`
-    returns Mesh
+    Implements a simplified Wavefront .obj parser.
+    Reads obj at `path`.
+    :param path: path to the obj file
+    :return: Mesh
     """
     vertices = []
     faces = []
@@ -69,9 +72,11 @@ def read_obj(path):
                 np.array(faces, dtype=np.int))
 
 
-def write_obj(path, mesh):
+def write_obj(path, mesh, precision=4):
+    def rnd(f):
+        return round(f, precision)
     with open(path, 'w') as fout:
         for vertice in mesh.get_vertices():
-            fout.write('v {} {} {}\n'.format(vertice[0], vertice[1], vertice[2]))
+            fout.write('v {} {} {}\n'.format(rnd(vertice[0]), rnd(vertice[1]), rnd(vertice[2])))
         for triangle in mesh.get_polygons():
             fout.write('f {} {} {}\n'.format(triangle[0] + 1, triangle[1] + 1, triangle[2] + 1))

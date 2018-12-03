@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-from collections import defaultdict, deque
+from collections import defaultdict, deque, namedtuple
 
 import tqdm
 import numpy as np
@@ -29,8 +29,17 @@ def _compute_coefs(mesh: Mesh) -> dict:
             res[v, u] += t
     return res
 
+RimdOutput = namedtuple('RimdOutput', ['rimd', 'rs', 'ss'])
+MeshesOutput = namedtuple('MeshOutput', ['meshes'])
 
-def meshes_to_rimds(meshes):
+def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
+    """
+    Transforms meshes into RIMD
+    :param meshes: list of Mesh objects, with the first element taken as base
+    :param output_rs: whether to return rs
+    :param output_ss: whether to return ss
+    :return: RimdOutput, RIMD of the input meshes
+    """
     # TODO: check if meshes are similar
 
     def group_tuples(seq):
@@ -67,14 +76,14 @@ def meshes_to_rimds(meshes):
         assert u not in decomps
         decomps[u] = decomp
 
-    # TODO: more checks
+    '''
     savetxt('rs1.txt', np.array([np.array(decomps[i])[:, 0] for i in range(meshes[0].get_num_vertices())])
             .transpose((1, 0, 2, 3)),
             (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
 
     savetxt('ss1.txt', np.array([np.array(decomps[i])[:, 1] for i in range(meshes[0].get_num_vertices())])
             .transpose((1, 0, 2, 3)),
-            (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
+            (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')'''
 
     features = []
     n_vert = meshes[0].get_num_vertices()
@@ -97,10 +106,20 @@ def meshes_to_rimds(meshes):
                                 logdr[1, 1], logdr[1, 2], logdr[2, 2]])
         features.append(feature)
 
-    return np.array(features, dtype=np.float64)
+    res = {
+        'rimd': np.array(features, dtype=np.float64),
+        'rs': None,
+        'ss': None,
+    }
+    if output_rs:
+        res['rs'] = np.array([np.array(decomps[i])[:, 0] for i in range(meshes[0].get_num_vertices())])
+    if output_ss:
+        res['ss'] = np.array([np.array(decomps[i])[:, 1] for i in range(meshes[0].get_num_vertices())])
+
+    return RimdOutput(**res)
 
 
-def rimds_to_meshes(rimd, mesh0: Mesh):
+def rimds_to_meshes(rimd, mesh0: Mesh) -> MeshesOutput:
     rimd = np.asanyarray(rimd, np.float64)
 
     # float64[n_meshes, n_features]
@@ -211,12 +230,12 @@ def rimds_to_meshes(rimd, mesh0: Mesh):
                 # TODO: refactor arrays from (n * 3, 3) to (n, 3, 3)
             b = update_b()
 
-        savetxt('rs2.txt', rs,
-                (']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
+        # savetxt('rs2.txt', rs,
+        #         (']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
 
         return Mesh(vertices, mesh0.get_polygons().copy())
 
-    return [optimize(ss[i], drs[i]) for i in range(n_meshes)]
+    return MeshesOutput([optimize(ss[i], drs[i]) for i in range(n_meshes)])
 
 
 def write_rimd(path, rimd):
