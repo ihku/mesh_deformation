@@ -7,7 +7,7 @@ import numpy as np
 
 from .mesh import read_obj, write_obj
 from .rimd import meshes_to_rimds, rimds_to_meshes, write_rimd, read_rimd
-
+from .utils import savetxt
 
 def run_all():
     parser = argparse.ArgumentParser()
@@ -59,6 +59,8 @@ def check_meshes_and_rs(input, output):
 
 
 def run_meshes2rimd(input, output, output_rs=None, output_ss=None):
+    if output_rs == output_ss and output_rs is not None:
+        raise Exception('output_ss should be different form output_rs')
     meshes = parse_meshes_file(input)
     kwargs = {
         'output_rs': output_rs is not None,
@@ -66,6 +68,10 @@ def run_meshes2rimd(input, output, output_rs=None, output_ss=None):
     }
     result = meshes_to_rimds(meshes, **kwargs)
     write_rimd(output, result.rimd)
+    if output_rs is not None:
+        savetxt(output_rs, result.rs, (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
+    if output_ss is not None:
+        savetxt(output_ss, result.ss, (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
 
 
 def run_rimd2meshes(input, mesh0, output_dir):
