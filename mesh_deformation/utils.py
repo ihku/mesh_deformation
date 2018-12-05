@@ -1,10 +1,57 @@
 #!/usr/bin/env python3
 
 import numpy as np
+import mpmath
+
+
+def logm_c(mat: np.ndarray) -> np.ndarray:
+    res = mpmath.logm(mpmath.matrix(mat))
+    return np.array(res.tolist(), dtype=np.complex64)
+
+
+def logm_r(mat: np.ndarray, check=False) -> np.ndarray:
+    res = mpmath.logm(mpmath.matrix(mat))
+    if check:
+        assert np.max(np.abs(res.apply(mpmath.im).tolist())) < 1e-6
+    return np.array(res.apply(mpmath.re).tolist(), dtype=np.float32)
+
+EPS = 1e-6
+
+def sqrtm_db(A: np.ndarray) -> np.ndarray:
+    # denman & beavers, 1976
+    assert len(A.shape) == 2 and A.shape[0] == A.shape[1]
+    X = A
+    Y = np.eye(A.shape[0])
+    while np.abs(X * X - A).max() > EPS:
+        iX = np.linalg.inv(X)
+        iY = np.linalg.inv(Y)
+        X = (X + iY) / 2
+        Y = (Y + iX) / 2
+    return X
+
+
+def logm_custom(A: np.ndarray) -> np.ndarray:
+    # alexa (2007) Linear combination of transformations, appendix C
+    assert len(A.shape) == 2 and A.shape[0] == A.shape[1]
+    k = 0
+    I = np.eye(A.shape[0])
+    while np.abs(A - I).max() > 0.5:
+        A = sqrtm_db(A)
+        k += 1
+    A = I - A
+    Z = A
+    X = A
+    i = 1
+    while np.abs(Z).max() > EPS:
+        Z = Z @ A
+        i += 1
+        X += Z / i
+    return X * 2 ** k
 
 
 def savetxt(fn, X, delims, header, footer):
     X = np.asanyarray(X)
+
     def write_mat(X, delims):
         for j, t in enumerate(X):
             if len(t.shape) == 0:

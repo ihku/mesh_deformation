@@ -9,7 +9,7 @@ import scipy.linalg
 from sksparse.cholmod import cholesky
 
 from .mesh import Mesh, edges_to_adjacency_list
-from .utils import savetxt
+from .utils import logm_r, logm_custom
 
 
 def cosv(a, b):
@@ -92,7 +92,9 @@ def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
             if i < j:  # need only unique edges
                 dr = rs[i].T @ rs[j]
                 # assert np.allclose(dr, dr.T)
-                logdr, err = scipy.linalg.logm(dr, disp=False)
+                # logdr, err = scipy.linalg.logm(dr, disp=False)
+                # logdr = logm_r(dr, check=False)
+                logdr = logm_custom(dr)
                 # print(logdr, np.linalg.det(dr))
                 feature.extend([logdr[0, 0], logdr[0, 1], logdr[0, 2],
                                 logdr[1, 1], logdr[1, 2], logdr[2, 2]])
