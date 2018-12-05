@@ -29,8 +29,8 @@ def _compute_coefs(mesh: Mesh) -> dict:
             res[v, u] += t
     return res
 
-RimdOutput = namedtuple('RimdOutput', ['rimd', 'rs', 'ss'])
-MeshesOutput = namedtuple('MeshOutput', ['meshes'])
+RimdOutput = namedtuple('RimdOutput', ['rimd', 'rs', 'ss'], defaults=(None,) * 3)
+MeshesOutput = namedtuple('MeshOutput', ['meshes', 'rs'], defaults=(None,) * 2)
 
 def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
     """
@@ -76,15 +76,6 @@ def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
         assert u not in decomps
         decomps[u] = decomp
 
-    '''
-    savetxt('rs1.txt', np.array([np.array(decomps[i])[:, 0] for i in range(meshes[0].get_num_vertices())])
-            .transpose((1, 0, 2, 3)),
-            (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
-
-    savetxt('ss1.txt', np.array([np.array(decomps[i])[:, 1] for i in range(meshes[0].get_num_vertices())])
-            .transpose((1, 0, 2, 3)),
-            (']]]\n\n\n[[[', ']],\n\n[[', '],\n[', ', '), '[[[', ']]]')'''
-
     features = []
     n_vert = meshes[0].get_num_vertices()
     for m in tqdm.trange(len(meshes)):
@@ -102,6 +93,7 @@ def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
                 dr = rs[i].T @ rs[j]
                 # assert np.allclose(dr, dr.T)
                 logdr, err = scipy.linalg.logm(dr, disp=False)
+                # print(logdr, np.linalg.det(dr))
                 feature.extend([logdr[0, 0], logdr[0, 1], logdr[0, 2],
                                 logdr[1, 1], logdr[1, 2], logdr[2, 2]])
         features.append(feature)
@@ -112,14 +104,16 @@ def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
         'ss': None,
     }
     if output_rs:
-        res['rs'] = np.array([np.array(decomps[i])[:, 0] for i in range(meshes[0].get_num_vertices())])
+        res['rs'] = np.array([np.array(decomps[i])[:, 0] for i in range(meshes[0].get_num_vertices())])\
+                            .transpose((1, 0, 2, 3))
     if output_ss:
-        res['ss'] = np.array([np.array(decomps[i])[:, 1] for i in range(meshes[0].get_num_vertices())])
+        res['ss'] = np.array([np.array(decomps[i])[:, 1] for i in range(meshes[0].get_num_vertices())]) \
+                            .transpose((1, 0, 2, 3))
 
     return RimdOutput(**res)
 
 
-def rimds_to_meshes(rimd, mesh0: Mesh) -> MeshesOutput:
+def rimds_to_meshes(rimd, mesh0: Mesh, output_rs=False, rs_help=None) -> MeshesOutput:
     rimd = np.asanyarray(rimd, np.float64)
 
     # float64[n_meshes, n_features]
@@ -177,7 +171,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh) -> MeshesOutput:
                     queue.append(v)
         return np.array([rs[v] for v in range(n_vertices)])
 
-    def optimize(ss, drs):
+    def optimize(mesh_i, ss, drs):
         # first, initialize parameters
         # float64[n_vertices, 3]
         vertices = np.empty_like(vert0)  # initialization isn't required since first step is a global step
@@ -190,7 +184,10 @@ def rimds_to_meshes(rimd, mesh0: Mesh) -> MeshesOutput:
         drs = drs_
 
         # rs = np.array([np.eye(3) for i in range(n_vertices)])
-        rs = do_bfs(mesh0, drs)
+        if rs_help is not None:
+            rs = rs_help[mesh_i, ...]
+        else:
+            rs = do_bfs(mesh0, drs)
 
         def update_b():
             mat_ = np.zeros(shape=(n_vertices, 3, 3))
@@ -208,7 +205,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh) -> MeshesOutput:
 
         # perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 1
+        N_ITERS = 10
         for i in tqdm.trange(N_ITERS):
             # global step
             vertices[1:] = A_factor(b).reshape(-1, 3)
@@ -230,12 +227,14 @@ def rimds_to_meshes(rimd, mesh0: Mesh) -> MeshesOutput:
                 # TODO: refactor arrays from (n * 3, 3) to (n, 3, 3)
             b = update_b()
 
-        # savetxt('rs2.txt', rs,
-        #         (']],\n\n[[', '],\n[', ', '), '[[[', ']]]')
+        res_mesh = Mesh(vertices, mesh0.get_polygons().copy())
+        if output_rs:
+            return res_mesh, rs
+        else:
+            return res_mesh,
 
-        return Mesh(vertices, mesh0.get_polygons().copy())
-
-    return MeshesOutput([optimize(ss[i], drs[i]) for i in range(n_meshes)])
+    res = [optimize(i, ss[i], drs[i]) for i in range(n_meshes)]
+    return MeshesOutput(*(list(t) for t in zip(*res)))
 
 
 def write_rimd(path, rimd):

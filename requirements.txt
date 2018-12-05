@@ -2,3 +2,7 @@ numpy
 scipy
 tqdm
 scikit-sparse
+mpmath
+torch
+torchvision
+pandas

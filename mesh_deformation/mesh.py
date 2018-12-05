@@ -7,15 +7,19 @@ import numpy as np
 class Mesh:
     __slots__ = '_vertices', '_polygons'
 
-    def __init__(self, vertices: np.ndarray, polygons: np.ndarray):
+    def __init__(self, vertices: np.ndarray, polygons: np.ndarray, copy=False):
         """
         :param vertices: numpy.ndarray of float32, list of points
         :param polygons: numpy.ndarray of int, list of polygons,
                     where each polygon is a list with three vertex indices
         """
 
-        self._vertices = vertices
-        self._polygons = polygons
+        if copy:
+            self._vertices = vertices.copy()
+            self._polygons = polygons.copy()
+        else:
+            self._vertices = vertices
+            self._polygons = polygons
 
     def get_vertices(self) -> np.ndarray:
         return self._vertices
@@ -58,6 +62,7 @@ def read_obj(path):
     vertices = []
     faces = []
     with open(path, 'r') as fin:
+        req_vert = set()
         for line in fin.readlines():
             line = line.strip()
             if len(line) == 0 or line[0] == '#':
@@ -66,7 +71,11 @@ def read_obj(path):
             if tokens[0] == 'v':
                 vertices.append(list(map(float, tokens[1:])))
             elif tokens[0] == 'f':
-                faces.append([int(t) - 1 for t in tokens[1:]])
+                face = [int(t.split('/')[0]) - 1 for t in tokens[1:]]
+                req_vert.update(face)
+                while len(face) >= 3:
+                    faces.append(face[-3:])
+                    del face[-2]
     # TODO: some checks
     return Mesh(np.array(vertices, dtype=np.float32),
                 np.array(faces, dtype=np.int))
