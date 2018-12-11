@@ -9,7 +9,7 @@ import scipy.linalg
 from sksparse.cholmod import cholesky
 
 from .mesh import Mesh, edges_to_adjacency_list
-from .utils import logm_r, logm_custom
+from .utils import logm_custom
 
 
 def cosv(a, b):
@@ -25,8 +25,10 @@ def _compute_coefs(mesh: Mesh) -> dict:
             p1, p2, p3 = vertices[u], vertices[v], vertices[w]
             c = cosv(p2 - p3, p1 - p3)
             t = c / (1 - c ** 2) ** 0.5
-            res[u, v] += t
-            res[v, u] += t
+            # res[u, v] += t
+            # res[v, u] += t
+            res[u, v] += 1
+            res[v, u] += 1
     return res
 
 RimdOutput = namedtuple('RimdOutput', ['rimd', 'rs', 'ss'], defaults=(None,) * 3)
@@ -78,6 +80,7 @@ def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
 
     features = []
     n_vert = meshes[0].get_num_vertices()
+    k = True ###### TODO: remove this
     for m in tqdm.trange(len(meshes)):
         # float64[n_vert, 3, 3]
         rs = np.array([decomps[v][m][0] for v in range(n_vert)])
@@ -94,7 +97,7 @@ def meshes_to_rimds(meshes, output_rs=False, output_ss=False) -> RimdOutput:
                 # assert np.allclose(dr, dr.T)
                 # logdr, err = scipy.linalg.logm(dr, disp=False)
                 # logdr = logm_r(dr, check=False)
-                logdr = logm_custom(dr)
+                logdr = logm_custom(dr.T) # FIXME: dr.T -> dr
                 # print(logdr, np.linalg.det(dr))
                 feature.extend([logdr[0, 0], logdr[0, 1], logdr[0, 2],
                                 logdr[1, 1], logdr[1, 2], logdr[2, 2]])
@@ -121,6 +124,10 @@ def rimds_to_meshes(rimd, mesh0: Mesh, output_rs=False, rs_help=None) -> MeshesO
     # float64[n_meshes, n_features]
     assert len(rimd.shape) == 2
 
+    def matr33antisym(ar):
+        assert ar.shape == (6,)
+        return np.array([[ar[0], ar[1], ar[2]], [-ar[1], ar[3], ar[4]], [-ar[2], -ar[4], ar[5]]])
+
     def matr33sym(ar):
         assert ar.shape == (6,)
         return np.array([[ar[0], ar[1], ar[2]], [ar[1], ar[3], ar[4]], [ar[2], ar[4], ar[5]]])
@@ -132,25 +139,25 @@ def rimds_to_meshes(rimd, mesh0: Mesh, output_rs=False, rs_help=None) -> MeshesO
     edges = mesh0.get_edges()
     edges_k = list(sorted((u, v) for u, v in edges.keys() if u < v))
     rimd_ = rimd[:, n_vertices * 6:]
-    drs = np.array([[scipy.linalg.expm(matr33sym(rimd_[i, t * 6:(t + 1) * 6]))
+    drs = np.array([[scipy.linalg.expm(matr33antisym(rimd_[i, t * 6:(t + 1) * 6]))
                      for t in range(len(edges_k))]
                     for i in range(n_meshes)])
     cotans_dict = _compute_coefs(mesh0)
 
     # perform Cholesky factorization of matrix A
-    A = scipy.sparse.lil_matrix((3 * n_vertices, 3 * n_vertices), dtype=np.float64)
+    A = scipy.sparse.csc_matrix((3 * n_vertices, 3 * n_vertices), dtype=np.float64)
     adj_list = edges_to_adjacency_list(edges.keys())
-    for v, v_edges in adj_list.items():
+    for u, u_edges in adj_list.items():
         s = 0
-        for u in v_edges:
-            t = cotans_dict[v, u]
-            A[v * 3, u * 3] = -t
-            A[v * 3 + 1, u * 3 + 1] = -t
-            A[v * 3 + 2, u * 3 + 2] = -t
+        for v in u_edges:
+            t = cotans_dict[u, v]
+            A[u * 3, v * 3] = -t
+            A[u * 3 + 1, v * 3 + 1] = -t
+            A[u * 3 + 2, v * 3 + 2] = -t
             s += t
-        A[v * 3, v * 3] = s
-        A[v * 3 + 1, v * 3 + 1] = s
-        A[v * 3 + 2, v * 3 + 2] = s
+        A[u * 3, u * 3] = s
+        A[u * 3 + 1, u * 3 + 1] = s
+        A[u * 3 + 2, u * 3 + 2] = s
 
     # TODO: explore time of numpy vs scipy implementations
     # TODO: what to do if A isn't positive definite
@@ -160,7 +167,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh, output_rs=False, rs_help=None) -> MeshesO
     A_factor = cholesky(A)
     print('logdet(A):', A_factor.logdet())
 
-    def do_bfs(mesh0, drs):
+    def do_bfs(drs):
         queue = deque()
         queue.append(0)
         rs = dict()
@@ -185,11 +192,17 @@ def rimds_to_meshes(rimd, mesh0: Mesh, output_rs=False, rs_help=None) -> MeshesO
             drs_[v, u] = drs[i].T
         drs = drs_
 
+        if rs_help is not None:
+            for u, vs in adj_list.items():
+                for v in vs:
+                    assert np.allclose(rs_help[mesh_i, u].T @ rs_help[mesh_i, v], drs[u, v], atol=1e-4), \
+                        '{}\n{}'.format(rs_help[mesh_i, u].T @ rs_help[mesh_i, v], drs[u, v])
+
         # rs = np.array([np.eye(3) for i in range(n_vertices)])
         if rs_help is not None:
             rs = rs_help[mesh_i, ...]
         else:
-            rs = do_bfs(mesh0, drs)
+            rs = do_bfs(drs)
 
         def update_b():
             mat_ = np.zeros(shape=(n_vertices, 3, 3))
@@ -207,7 +220,7 @@ def rimds_to_meshes(rimd, mesh0: Mesh, output_rs=False, rs_help=None) -> MeshesO
 
         # perform optimization steps
         # TODO: explore convergence and choose number of steps properly
-        N_ITERS = 10
+        N_ITERS = 3
         for i in tqdm.trange(N_ITERS):
             # global step
             vertices[1:] = A_factor(b).reshape(-1, 3)

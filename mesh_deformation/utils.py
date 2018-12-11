@@ -1,19 +1,7 @@
 #!/usr/bin/env python3
 
 import numpy as np
-import mpmath
 
-
-def logm_c(mat: np.ndarray) -> np.ndarray:
-    res = mpmath.logm(mpmath.matrix(mat))
-    return np.array(res.tolist(), dtype=np.complex64)
-
-
-def logm_r(mat: np.ndarray, check=False) -> np.ndarray:
-    res = mpmath.logm(mpmath.matrix(mat))
-    if check:
-        assert np.max(np.abs(res.apply(mpmath.im).tolist())) < 1e-6
-    return np.array(res.apply(mpmath.re).tolist(), dtype=np.float32)
 
 EPS = 1e-6
 
@@ -32,6 +20,7 @@ def sqrtm_db(A: np.ndarray) -> np.ndarray:
 
 def logm_custom(A: np.ndarray) -> np.ndarray:
     # alexa (2007) Linear combination of transformations, appendix C
+    # TODO: tests
     assert len(A.shape) == 2 and A.shape[0] == A.shape[1]
     k = 0
     I = np.eye(A.shape[0])

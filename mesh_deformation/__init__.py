@@ -13,25 +13,30 @@ def run_all():
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest='command')
     subparsers.required = True
+
     parser_rimd = subparsers.add_parser('rimd', help='Convert meshes to RIMD')
     parser_rimd.add_argument('--input', help='path to list_meshes.txt', type=str, required=True)
     parser_rimd.add_argument('--output', help='path to rimd npz output', type=str, required=True)
     parser_rimd.add_argument('--output-rs', help='path to rs output at txt', type=str, default=None)
     parser_rimd.add_argument('--output-ss', help='path to ss output at txt', type=str, default=None)
+
     parser_mesh = subparsers.add_parser('mesh', help='Convert RIMD to meshes')
     parser_mesh.add_argument('--input', help='path to rimd npz input', type=str, required=True)
     parser_mesh.add_argument('--mesh0', help='path to base mesh', type=str, required=True)
     parser_mesh.add_argument('--output-dir', help='path to output dir', type=str, required=True)
-    parser_mesh = subparsers.add_parser('check', help='Check RIMDs on some input')
-    parser_mesh.add_argument('--input', help='path to rimd npz input', type=str, required=True)
-    parser_mesh.add_argument('--output', help='path to output dir', type=str, default=None)
+
+    parser_check = subparsers.add_parser('check', help='Check RIMDs on some input')
+    parser_check.add_argument('--input', help='path to rimd npz input', type=str, required=True)
+    parser_check.add_argument('--output', help='path to rimd output', type=str, default=None)
+    parser_check.add_argument('--output-dir', help='path to output dir', type=str, default=None)
+
     args = parser.parse_args()
     if args.command == 'rimd':
         run_meshes2rimd(args.input, args.output, args.output_rs, args.output_ss)
     elif args.command == 'mesh':
         run_rimd2meshes(args.input, args.mesh0, args.output_dir)
     elif args.command == 'check':
-        check_meshes_and_rs(args.input)
+        check_meshes_and_rs(args.input, args.output, args.output_dir)
     else:
         raise Exception('unsupported command: ', args.command)
 
@@ -51,11 +56,15 @@ def write_meshes_to_dir(dirname, meshes):
         write_obj(os.path.join(dirname, '%d.obj' % i), mesh)
 
 
-def check_meshes_and_rs(input, output):
+def check_meshes_and_rs(input, output, output_dir):
     meshes = parse_meshes_file(input)
     rimds, rs, *_ = meshes_to_rimds(meshes, output_rs=True)
+    if output is not None:
+        write_rimd(output, rimds)
     meshes_new, rs_new = rimds_to_meshes(rimds, meshes[0], output_rs=True, rs_help=rs)
+    write_meshes_to_dir(output_dir, meshes_new)
     assert np.allclose(rs, rs_new)
+    print('OK')
 
 
 def run_meshes2rimd(input, output, output_rs=None, output_ss=None):

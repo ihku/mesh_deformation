@@ -40,3 +40,6 @@ out/
 
 ### CUSTOM
 test/
+TMP/
+OUT/
+*.npy
